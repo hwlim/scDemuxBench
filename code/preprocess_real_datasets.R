@@ -41,14 +41,14 @@ for (sample_name in samples) {
                        ,"_freemuxlet_MULTI_HTO_GMM_annotations.csv"), destfile = paste0(sample.dir,"/ground_truth.csv") )
   
   # preprocess ground truth
-  ground.truth = read.table( paste0(data.dir,"/ground_truth.csv"), sep = "\t", header = T)
+  ground.truth = read.table( paste0(sample.dir,"/ground_truth.csv"), sep = "\t", header = T)
   ground.truth$freemuxlet_final = ground.truth$freemuxlet_DROPLET.TYPE
   ground.truth$freemuxlet_final[ground.truth$freemuxlet_DROPLET.TYPE == "Singlet"] = ground.truth$freemuxlet_BEST.GUESS[ground.truth$freemuxlet_DROPLET.TYPE == "Singlet"]
   ground.truth$freemuxlet_final[ground.truth$freemuxlet_final == "AMB"] = "Negative"
   table(ground.truth$freemuxlet_final)
   
   # read tag counts matrix
-  raw_mtrx = Read10X(data.dir ,  strip.suffix = T)$`Antibody Capture` 
+  raw_mtrx = Read10X(sample.dir ,  strip.suffix = T)$`Antibody Capture` 
   rownames(raw_mtrx)
   
   # update tag names to be consistent with ground truth
