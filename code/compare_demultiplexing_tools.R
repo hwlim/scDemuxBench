@@ -7,10 +7,8 @@ library(demuxmix)
 library(Seurat)
 library(dplyr)
 
-source("./sample_demultiplexing.R")
+source("./clustering-based_sample_demultiplexing.R")
 source("./benchmarking.R")
-
-#source("./functions.R")
 
 set.seed(1)
 
@@ -25,7 +23,7 @@ results_dir = dirname(results_file)
 doublet_calling_output = paste0(results_dir,"/doublet_calling.txt")
 
 ###### column name in Seurat object with ground truth labels
-ground_truth_column = "orig.ident"
+ground_truth_column = "ground_truth"
 
 # report performance of all tags or just the average
 report_all_SBOs = FALSE
@@ -73,7 +71,7 @@ for (sample in samples) {
   # ### B) Run demultiplexing tools that don’t expect normalized counts as an input
   # # 1) deMULTIplex2
   if("deMULTIplex2" %in% names(workflows)){
-    tag_mtx <- seurat_object@assays$HTO@counts %>% t()
+    tag_mtx <- seurat_object@assays$HTO@counts %>% as.matrix() %>%  t()
     
     tryCatch(expr = {
       demultiplex2_res <- demultiplexTags(tag_mtx, # Required, the tag count matrix from your experiment, can be either dense or sparse
