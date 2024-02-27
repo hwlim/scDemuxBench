@@ -1,0 +1,437 @@
+---
+title: "Visualization of benchmarking results"
+output:
+  html_document:
+    df_print: paged
+---
+
+## load necessary libraries
+
+```{r,message=FALSE}
+library(Seurat)
+library(ggplot2)
+library(circlize)
+library(ComplexHeatmap)
+library(grid)
+library(cowplot)
+library(ggpubr)
+library(dplyr)
+source("functions.R")
+
+set.seed(1)
+```
+
+## input data
+```{r}
+#location of folder with Seurat objects of test datasets
+seurat_objects_dir = "~/projects/demux-benchmarking/results/all_datasets/seurat/"
+benchmarking_results_dir = "~/projects/demux-benchmarking/manuscript/results/"
+```
+
+## Effect of ambient contamination on demultiplexing
+```{r,message=FALSE}
+dataset = "CMO_nuclei"
+assay = "HTO"
+seurat_object = readRDS(sprintf("%s/%s.rds",seurat_objects_dir,dataset))
+
+seurat_object = runUMAP(seurat_object, normalization_margin = 1)
+seurat_object$ground_truth = factor(seurat_object$ground_truth)
+
+mtrx = GetAssayData(seurat_object,assay = assay ,slot = "counts") %>% as.matrix()
+df = mtrx %>% reshape2::melt()
+colnames(df) = c("Tag", "cell_id","counts")
+#df$cell_type = sapply(df$Tag, FUN = function(x) { barcode2cellType[[x]] })
+
+#df$Tag = sapply(df$Tag, FUN = function(x) {paste0(x ," (" , barcode2cellType[[x]] , ")") })
+df$Tag = as.factor(df$Tag )
+df$Tag  = factor(df$Tag , levels = stringr::str_sort(levels(df$Tag ), numeric = T) )
+
+vln_raw = ggplot(df, aes(x=Tag, y=log1p(counts), fill=Tag)) +
+  geom_violin() +theme_classic()+
+  theme(legend.position="right")+
+  theme(text = element_text(size=13), plot.title =element_text(face = "bold"),
+        axis.text.x = element_text(angle=-45, hjust=0,vjust = 1,  size = 13))+
+  scale_fill_manual(values = c('#F68282','#28CECA','#B95FBB','gray'))+
+   ylab("log (raw_counts + 1)") + ggtitle("A    Before Normalization")
+
+##
+seurat_object = seurat_object %>% NormalizeData(normalization.method = "CLR",margin = 1,
+                                                assay = "HTO")
+
+FeaturePlot(seurat_object, features = rownames(seurat_object)[1:2], max.cutoff = "q95",min.cutoff = "q5", slot = "data", keep.scale = "all")
+
+###### 
+raw_counts = GetAssayData(seurat_object,assay = assay ,slot = "counts") %>% as.matrix() %>% t() %>% as.data.frame() 
+topHTO <- apply(raw_counts, 1, function(x) names(x)[x == max(x)][[1]])
+
+norm_counts = GetAssayData(seurat_object,assay = assay ,slot = "data") %>% as.matrix() %>% t() %>% as.data.frame() 
+topHTO_norm <- apply(norm_counts, 1, function(x) names(x)[x == max(x)][[1]])
+
+seurat_object$topHTO = topHTO
+seurat_object$topHTO_norm = topHTO_norm
+
+seurat_object$topHTO = factor(seurat_object$topHTO)
+
+
+my_cols <- c('DU145'='#F68282','MCF7'='#28CECA','MDAMB231'=  '#B95FBB','PC3'='gray', 'Doublet' = "black")
+topTag_rawCounts = DimPlot(seurat_object, group.by = "topHTO", cols = my_cols,pt.size = 0.1)+ggtitle("D      Top Tag (raw counts)")  + theme(plot.title = element_text(hjust = 0))
+
+topTag_normCounts = DimPlot(seurat_object, group.by = "topHTO_norm", cols = my_cols,pt.size = 0.1)+ggtitle("E      Top Tag (Normalized counts)") + theme(plot.title = element_text(hjust = 0))
+
+ground_truth_umap = DimPlot(seurat_object, group.by = "ground_truth", cols = my_cols, pt.size = 0.1)+ggtitle("C      Ground Truth") + theme(plot.title = element_text(hjust = -0))
+
+table(topHTO)
+##############
+mtrx = GetAssayData(seurat_object,assay = assay ,slot = "data") %>% as.matrix()
+df = mtrx %>% reshape2::melt()
+colnames(df) = c("Tag", "cell_id","Normalized_counts")
+df$Tag = as.factor(df$Tag )
+df$Tag  = factor(df$Tag , levels = stringr::str_sort(levels(df$Tag ), numeric = T) )
+
+vln_norm = ggplot(df, aes(x=Tag, y=Normalized_counts, fill=Tag)) +
+  geom_violin() +theme_classic()+
+  theme(legend.position="right")+
+  theme(text = element_text(size=13),axis.text.x = element_text(angle=-45, hjust=0,vjust = 1,  size = 13) , plot.title =element_text(face = "bold") )+
+  scale_fill_manual(values = c('#F68282','#28CECA','#B95FBB','gray'))+
+  ylab("Normalized counts") + ggtitle("B    After per-tag CLR Normalization")
+
+( vln_raw + vln_norm)/ ( topTag_rawCounts + topTag_normCounts + ground_truth_umap)
+
+
+figure1 <- ggpubr::ggarrange(plotlist = list((vln_raw + vln_norm)/ (ground_truth_umap + topTag_rawCounts + topTag_normCounts) ),ncol = 1, nrow = 1)
+figure1
+#pdf("~/projects/demux-benchmarking/manuscript/Figures/fig_1A.pdf", width = 14, height = 8)
+#figure1
+#dev.off()
+```
+
+## Effect of sequence depth variability on demultiplexing
+```{r}
+dataset = "LMO_custom_cells"
+tag = "DU145"
+
+seurat_object = readRDS(sprintf("%s/%s.rds",seurat_objects_dir,dataset))
+
+seurat_object$total_counts = log(seurat_object$nCount_HTO)
+seurat_object = seurat_object %>% runUMAP(normalization_margin =1)
+
+
+my_cols <- c('DU145'='#F68282','MCF7'='#28CECA','MDAMB231'=  '#B95FBB','PC3'='gray', 'Doublet' = "black")
+
+p1 = DimPlot(seurat_object, group.by = "ground_truth",cols = my_cols)+ ggtitle("") + scale_color_discrete(name = "Ground truth") 
+p2 = FeaturePlot(seurat_object,features = "total_counts",max.cutoff = "q95", min.cutoff = "q5")+ ggtitle("") + scale_color_continuous(name = "Total tag counts", type = "viridis") 
+
+seurat_object = seurat_object %>% runUMAP(normalization_margin = 2)
+p3 = DimPlot(seurat_object, group.by = "ground_truth",cols = my_cols)+ ggtitle("") + scale_color_discrete(name = "Ground truth") 
+p4 = FeaturePlot(seurat_object,features = "total_counts",max.cutoff = "q95", min.cutoff = "q5")+ ggtitle("")+ scale_color_continuous(name = "Total tag counts", type = "viridis") 
+
+
+figure <- ggpubr::ggarrange(plotlist = list(p1 ,p3, p2,p4),ncol = 2, nrow = 2,hjust = 0, labels = c("A","B","C","D"),label.x = 0.001)
+figure2 = annotate_figure(figure,top = text_grob("No sequencing depth normalization                                            With sequencing depth normalization", rot = 0, size = 15,face = "bold"))
+
+figure2
+# pdf("~/projects/demux-benchmarking/manuscript/Figures/fig_1B.pdf", width = 13, height = 10)
+# figure2
+# dev.off()
+```
+
+## separability analysis
+
+```{r,message=FALSE}
+
+df = read.csv(sprintf("%s/separability_analysis.csv",benchmarking_results_dir),header = T)
+
+ggplot(df, aes(x = reorder(Normalization , -AUCPR), y = AUCPR, fill =Normalization)) + 
+  geom_violin() + labs(title="",x="Demuxplexing workflows", y = "aucPR")+ 
+  geom_jitter(color="black", size=0.4, width = 0.1) +
+  theme_cowplot()+ theme(text = element_text(size=13),
+                         axis.text.x = element_text(angle=-45, hjust = 0,vjust=1, size = 14)) 
+
+
+#####
+df2 = reshape2::dcast(df, Dataset + tag ~ Normalization, value.var = "AUCPR")
+df2$label = ifelse(df2$raw < 0.8, df2$Dataset,"")
+
+title_color = "red"
+title_size = 14
+
+p1 = ggplot(data = df2,aes(y = CLR_1, x = raw)) +
+  geom_point(aes()) + xlab("AUCPR of raw counts")+
+  #ggrepel::geom_text_repel(seed = 1, size=4)+
+  ylab("AUCPR of normalized counts")+ 
+  xlim(c(0.55,1))+ylim(c(0.55,1))+
+  theme(text = element_text(size=12),legend.position = "None",plot.title = element_text(size = title_size, color = title_color),
+                         axis.text.x = element_text(angle=0, hjust=0,vjust = 1,  size = 12),
+                         axis.text.y = element_text( size = 12),
+                         axis.title.x =  element_text( size = 11),
+                         axis.title.y =  element_text( size = 11)) +
+  geom_abline(linetype = "dashed") + ggtitle("CLR_exp_bias")
+
+p2 = ggplot(data = df2,aes(y = CLR_2, x = raw)) +
+  geom_point(aes()) + xlab("AUCPR of raw counts")+
+  #ggrepel::geom_text_repel(seed = 1, size=4)+
+  ylab("AUCPR of normalized counts")+ 
+  xlim(c(0.55,1))+ylim(c(0.55,1))+
+  theme(text = element_text(size=12),legend.position = "None",plot.title = element_text(size = title_size,color = title_color),
+                         axis.text.x = element_text(angle=0, hjust=0,vjust = 1,  size = 12),
+                         axis.text.y = element_text( size = 12),
+                         axis.title.x =  element_text( size = 11),
+                         axis.title.y =  element_text( size = 11)) +
+  geom_abline(linetype = "dashed")+ggtitle("CLR_seq_depth")
+
+p3 = ggplot(data = df2,aes(y = RC, x = raw, label = label)) +
+  geom_point(aes()) + xlab("AUCPR of raw counts")+
+  ggrepel::geom_text_repel(seed = 1, size=4)+
+  ylab("AUCPR of normalized counts")+ 
+  xlim(c(0.55,1))+ylim(c(0.55,1))+
+  theme(text = element_text(size=12),legend.position = "None", plot.title = element_text(size = title_size,color = title_color),
+                         axis.text.x = element_text(angle=0, hjust=0,vjust = 1,  size = 12),
+                         axis.text.y = element_text( size = 12),
+                         axis.title.x =  element_text( size = 11),
+                         axis.title.y =  element_text( size = 11)) +
+  geom_abline(linetype = "dashed")+ggtitle("Relative counts/LogNomralize",)
+
+
+p1 + p2 +p3
+```
+
+## examples of increased separability after normalization
+
+```{r,message=FALSE}
+dataset = "lung_cell_line"
+seurat_object = readRDS(sprintf("%s/%s.rds",seurat_objects_dir,dataset))
+
+tag = rownames(seurat_object)[3]
+title_color = "red"
+title_size = 14
+
+
+seurat_object2 = subset(seurat_object, subset = ground_truth != "Doublet")
+seurat_object2$pos_neg= ifelse(grepl(pattern = tag,x = seurat_object2$ground_truth ),paste0(tag,"+ cells"),paste0(tag,"- cells"))
+res = separability_analysis(seurat_object2, tag = tag,positive_cells = "pos_neg", norm.methods = c("CLR_2","RC","CLR_1","LogNormalize"))
+
+plots = list()
+for(p in names(res$histograms)){
+  grob <- grobTree(textGrob(sprintf("AUCPR = %0.2f",res$AUCPR[[p]]), x=0.4,  y=0.90, hjust=0,
+                            gp=gpar(col="black", fontsize=11))) 
+  plots[[p]] = res$histograms[[p]] + annotation_custom(grob) + theme_classic()
+}
+
+raw = plots$raw + ggtitle("Raw counts") + theme( plot.title = element_text(size = title_size,color = title_color))
+clr1 = plots$CLR_1 + ggtitle("CLR_exp_bias ")+ theme( plot.title = element_text(size = title_size,color = title_color))
+clr2 =  plots$CLR_2 +ggtitle("CLR_seq_depth")+ theme( plot.title = element_text(size = title_size,color = title_color))
+RC =  plots$RC +ggtitle("Relative counts")+ theme( plot.title = element_text(size = title_size,color = title_color))
+logNorm = plots$LogNormalize +ggtitle("LogNormalize")+ theme( plot.title = element_text(size = title_size,color = title_color))
+(raw + clr1 + clr2) / (logNorm + RC)
+
+
+seurat_object = seurat_object %>% NormalizeData(normalization.method = "CLR",margin = 1,
+                                                assay = "HTO")
+seurat_object$dataset = dataset
+RidgePlot(seurat_object, features = tag, group.by = "dataset" , log = T, slot = "counts", ncol = )|
+  RidgePlot(seurat_object, features = tag , group.by = "dataset" , log = F, slot = "data", ncol = 1)
+```
+
+
+## Figure #1
+
+```{r}
+figure <- ggpubr::ggarrange(plotlist = list(p1+p2+p3,raw+clr1+clr2+logNorm+RC),ncol = 1, nrow = 2,hjust = 0, labels = c("A","B"),label.x = 0.001)
+
+figure
+# pdf("~/projects/demux-benchmarking/manuscript/Figures/fig_1.pdf", width = 12, height = 8)
+# figure
+# dev.off()
+
+
+```
+
+## Comparison of normalization-based workflows with existing tools (real datasets)
+
+```{r,message=FALSE}
+file = sprintf("%s/real_datasets.csv",benchmarking_results_dir)
+df = read.table(file,header = F)
+colnames(df) = c("Dataset","Demultiplexing_method","tag", "metric", "value")
+df = df[df$metric == "Fscore",]
+
+
+qc = read.csv(sprintf("%s/sample_level_metrics.csv",benchmarking_results_dir), header = T, row.names = 1)
+
+top_workflows = df %>% dplyr::group_by(Demultiplexing_method) %>% dplyr::summarise(avg_fscore = mean(value)) %>% dplyr::arrange(-avg_fscore)
+
+df$Demultiplexing_method = factor(df$Demultiplexing_method, levels = top_workflows$Demultiplexing_method)
+
+mtrx = df %>% reshape2::dcast(formula = paste0("Demultiplexing_method", "~", "Dataset"),
+                                value.var = "value")
+rownames(mtrx) = mtrx[,"Demultiplexing_method"]
+mtrx = mtrx[,c(2:ncol(mtrx))]
+mtrx = mtrx %>% as.matrix()
+qc = qc[colnames(mtrx),]
+col_fun = circlize::colorRamp2(breaks = c(0,0.8,1),
+                               hcl_palette = "BlueRed 2", reverse = F)
+col_fun2 = colorRamp2(c(min(qc$seq_depth_var), mean(qc$seq_depth_var), max(qc$seq_depth_var)), c('gray', "white", "brown"))
+column_ha = HeatmapAnnotation("Sequencing depth variability" = qc$seq_depth_var,col = list("Sequencing depth variability" = col_fun2), annotation_legend_param = list("Sequencing depth variability" = list(direction = "horizontal")))
+
+ht = ComplexHeatmap::Heatmap(mtrx %>% as.matrix(), col =col_fun, cluster_rows = F, cluster_columns = T,
+                        row_names_gp = gpar(fontsize = 13) ,top_annotation=column_ha,
+                        heatmap_legend_param = list(direction = "horizontal"),
+                        column_names_gp = gpar(fontsize = 13) ,
+                        name = "Average F-score",column_names_rot = -45,
+                        cell_fun = function(j, i, x, y, width, height, fill) 
+                        {grid.text(sprintf("%0.2f", mtrx[i, j]), x, y, gp = gpar(fontsize = 13,
+                                                                                 col = "black"))},
+                        row_names_side = "right", column_names_side = "bottom" )
+
+Fscore_heatmap = draw(ht, heatmap_legend_side = "top", annotation_legend_side = "top")
+
+Fscore_heatmap
+```
+## Doublet calling
+```{r}
+
+file = sprintf("%s/doublet_calling.txt",benchmarking_results_dir)
+
+df2 = read.table(file,header = F)
+colnames(df2) = c("Dataset",	"Demultiplexing_method",	"classification",	"proportion")
+
+df2$Demultiplexing_method = as.factor(df2$Demultiplexing_method)
+df2$Demultiplexing_method = factor(df2$Demultiplexing_method, levels = top_workflows$Demultiplexing_method)
+
+Dblt.as.snglts = df2[df2$classification == "Singlet", ]
+
+mtrx = Dblt.as.snglts %>% reshape2::dcast(formula = paste0("Demultiplexing_method", "~", "Dataset"),value.var = "proportion")
+
+rownames(mtrx) = mtrx[,"Demultiplexing_method"]
+mtrx = mtrx[,c(2:ncol(mtrx))]
+mtrx = mtrx %>% as.matrix()
+qc = qc[colnames(mtrx),]
+col_fun = circlize::colorRamp2(breaks = c(0,0.5 , 0.8),
+                               hcl_palette = "BlueRed 2", reverse = F)
+col_fun2 = colorRamp2(c(min(qc$seq_depth_var), mean(qc$seq_depth_var), max(qc$seq_depth_var)), c('gray', "white", "brown"))
+column_ha = HeatmapAnnotation("Sequencing depth variability" = qc$seq_depth_var,col = list("Sequencing depth variability" = col_fun2), annotation_legend_param = list("Sequencing depth variability" = list(direction = "horizontal")))
+
+ht = ComplexHeatmap::Heatmap(mtrx %>% as.matrix(), col =col_fun, cluster_rows = F, cluster_columns = T,row_names_gp = gpar(fontsize = 13) ,top_annotation=column_ha,
+                        heatmap_legend_param = list(direction = "horizontal"),
+                        column_names_gp = gpar(fontsize = 13) ,
+                        name = "Proportion of doublets predicted as signlets", column_names_rot = -45,
+                        cell_fun = function(j, i, x, y, width, height, fill) 
+                        {grid.text(sprintf("%0.2f", mtrx[i, j]), x, y, gp = gpar(fontsize = 13,
+                                                                                 col = "black"))},
+                        row_names_side = "right", column_names_side = "bottom" )
+
+dblt_heatmap = draw(ht, heatmap_legend_side = "top", annotation_legend_side = "top")
+dblt_heatmap 
+```
+
+## LMO_custom_cells example
+```{r}
+dataset = "LMO_custom_cells"
+seurat_object = readRDS(sprintf("%s/%s.rds",seurat_objects_dir,dataset))
+tag = rownames(seurat_object)[4]
+
+totalCellsPerTag = data.frame(ground_truth = seurat_object$ground_truth) %>%
+dplyr::group_by(ground_truth) %>% dplyr::summarise(total = n())  
+
+predictions = read.table(sprintf("%s/lmo_custom_predictions.txt",benchmarking_results_dir), sep = "\t", header = T)
+
+df = inner_join(totalCellsPerTag, predictions)
+df$percentage = df$num_cells / df$total
+df = df[df$ground_truth ==tag ,]
+
+df$predicted_label[df$predicted_label != df$ground_truth & df$predicted_label %in% rownames(seurat_object)] = "Other singlets"
+df =df[df$predicted_label != df$ground_truth, ]
+
+df=df %>% dplyr::group_by(ground_truth,workflow ,predicted_label) %>% dplyr::summarise(num_cells = sum(num_cells),percentage =sum(percentage) )  
+
+miscalssifications_plot = ggplot(data = df,aes(y = percentage,fill =  predicted_label , x = workflow)) + 
+    theme_bw()+
+    geom_bar(stat="identity", position=position_dodge(),color="black", width = 0.7)+
+    theme(axis.text.x = element_text(angle=-45, hjust = 0,vjust=1, size = 12),text = element_text(size = 14), 
+           plot.title = element_text(size = 14, face = "bold"))+
+    ylab("Proportion")+
+    xlab("Demultiplexing workflow")+ylim(c(0,max(df$percentage)))+
+    scale_fill_discrete(name= "Misclassified as")+ggtitle("Types of miscalssifcations of DU145-tagged cells\n(LMO_custom_cells sample)")
+
+############# per-tag sequencing depth variability
+df = data.frame(ground_truth = seurat_object$ground_truth, total_counts = seurat_object$nCount_HTO)
+df= df[!df$ground_truth %in% c("Doublet","Negative"),]
+df = df %>% dplyr::group_by(ground_truth) %>% dplyr::summarise(seq_depth_range = quantile(total_counts, probs = c(0.99))/
+                                                    quantile(total_counts, probs = c(0.01)))
+
+perTag_seqDepthVar = ggplot(data = df,aes(y = seq_depth_range ,x = reorder(ground_truth, -seq_depth_range), fill = ground_truth)) + geom_bar(stat="identity")+ theme_bw()+theme(text = element_text(size=14),legend.position = "None",axis.text.x = element_text(angle=-45, hjust = 0,vjust=1, size = 14))+ xlab("Ground truth label") + ylab("Sequencing depth variability")+
+  ggtitle("Per-tag sequencing depth variability \n(LMO_custom_cells sample)")+ theme(plot.margin = margin(0.1,1,2,0.1, "cm"),
+                               plot.title = element_text(size = 14, face = "bold")) 
+
+perTag_seqDepthVar
+#############
+results = seq_depth_effect(seurat_object,tag = tag, predictions = "ground_truth", nbins= 100,norm.method = "CLR_2",ground_truth_column = "ground_truth",pointSize = 0.7)
+norm_vs_raw =results$plots[[5]]+ggtitle("Sequencing depth normalized vs raw counts for DU145 tag\n(LMO_custom_cells sample)")+theme(text = element_text(size=14)) +theme(plot.margin = margin(0.1,0.1,4,0.1, "cm"), plot.title = element_text(size = 14, face = "bold")) 
+
+```
+
+## Figure #4
+
+```{r}
+ht_fscore = grid.grabExpr(draw(Fscore_heatmap))
+ht_dblt= grid.grabExpr(draw(dblt_heatmap))
+
+figure1 <- ggpubr::ggarrange(plotlist = list(ht_fscore,ht_dblt),ncol = 2, nrow = 1,hjust = 0, labels = c("A","B"),label.x = 0)
+figure2 <- ggpubr::ggarrange(plotlist = list(perTag_seqDepthVar, miscalssifications_plot, norm_vs_raw),ncol = 3, nrow = 1,hjust = 0, labels = c("C","D","E"),label.x = 0,font.label = list(size = 18))
+
+figure <- ggpubr::ggarrange(plotlist = list(figure1, figure2),ncol = 1, nrow = 2,hjust = 0, heights = c(2,1.5))
+
+
+# pdf("~/projects/demux-benchmarking/manuscript/Figures/fig_4.pdf", width = 20, height = 15)
+# figure
+# dev.off()
+
+```
+
+## Comparison of normalization-based workflows with existing tools (simulated datasets)
+```{r,message=FALSE}
+
+file = sprintf("%s/simulated.txt",benchmarking_results_dir)
+df = read.table(file)
+colnames(df) = c( "Dataset","Demultiplexing_method","tag","metric","value")
+df = df[ df$metric == "Fscore" & df$tag == "Average" ,]
+df$Dataset = stringr::str_remove_all(string = df$Dataset,pattern = ".rep.*")
+
+df = df %>% dplyr::group_by(Dataset,Demultiplexing_method,tag,metric) %>% 
+  dplyr::summarise(avg_Fscore = mean(value), std_Fscore = sd(value))
+
+table(df$Dataset)
+table(df$Demultiplexing_method)
+
+p1 = ggplot(df, aes(x = reorder(Demultiplexing_method, avg_Fscore), y = avg_Fscore, fill =Demultiplexing_method)) + 
+  geom_boxplot(width=0.4,alpha = 1, outlier.shape = NA) + labs(title="",x="Demultiplexing workflows", y = "F score")+ 
+  geom_jitter(color="black", size=0.4, width = 0.1) +
+  theme_bw()+ 
+  theme(text = element_text(size=14),axis.text.x = element_text(angle=0, hjust = 0,vjust=1, size = 14), legend.position = "none", axis.text.y = element_text( size = 14), axis.title.y =  element_text( size = 14))+coord_flip()
+
+#################################### line plot (trend plot)
+tmp = stringr::str_split(df$Dataset,pattern = "\\.|_")
+df$max.ambient = as.integer(sapply(tmp,FUN = function(x) x[3]))
+df$cell_bound = as.integer(sapply(tmp,FUN = function(x) x[5]))
+df$cell_bound = paste0( as.character(round(exp(-df$cell_bound) * 100, digits = 0 )), "%")
+
+df$cell_bound = as.factor(df$cell_bound)
+df$cell_bound = factor(df$cell_bound, stringr::str_sort(levels(df$cell_bound), numeric = T))
+
+df$max.ambient = as.factor(df$max.ambient)
+
+df2 = df[ grepl(pattern = "Clustering", x = df$Demultiplexing_method),]
+
+p2 = ggplot(df2, aes(x = max.ambient, y = avg_Fscore, color =Demultiplexing_method, group = Demultiplexing_method )) + 
+  geom_point(size = 2) +geom_line(size= 1) +facet_wrap(~cell_bound, labeller = label_both, ncol = 2) +
+  theme_bw()+
+   theme(text = element_text(size=15), axis.text.x = element_text(angle=45, hjust=1, size = 15))+
+  ylab("F score")+
+  xlab("Maximum ambient contamination")+
+   scale_x_discrete(labels= c("100","","500","","900","","1300","","1700",""))+
+  ylim(c(0,1))+ scale_color_discrete(name = "Demultiplexing workflows")
+
+
+figure <- ggpubr::ggarrange(plotlist = list(p1,p2),ncol = 2, nrow = 1,hjust = 0, labels = c("A","B"),label.x = 0.001)
+ figure
+```
+

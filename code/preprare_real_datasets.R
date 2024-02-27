@@ -2,33 +2,48 @@ library(Seurat)
 library(openxlsx)
 library(dplyr)
 
+####################################################################
+## This script first downloads tag counts matrix and ground 
+##
+####################################################################
+
 # increase download timeout
 options(timeout=1000)
-
-# This script provides the instructions to download, filter and save 12 publicly-available datasets
-# each tag counts matrix along with ground truth are saved as Seurat object
-
 
 # folder to save downloaded raw data
 data.dir = "../datasets/raw_data//"
 
-# folder with created Seurat objects
+# folder to store Seurat objects
 seurat.dir = "../datasets/seurat_objects/"
 
-########## Mylka (2022)##########################################################
-#citation: Mylka et al. "Comparative analysis of antibody-and lipid-based multiplexing methods for single-cell RNA-seq." Genome Biology 23.1 (2022): 1-21.
+if(!dir.exists(data.dir)) {
+  dir.create(data.dir, recursive = T)
+}
 
+if(!dir.exists(seurat.dir)) {
+  dir.create(seurat.dir, recursive = T)
+}
+
+########## Mylka (2022)##########################################################
 ## download data
 samples = c("CMO_nuclei","LMO_custom_cells","LMO_MULTISeq_cells","TotalSeqA_cells", "TotalSeqA_cells_rep2",
             "TotalSeqA_nuclei", "TotalSeqC_cells")
 
 for (sample_name in samples) {
   sample.dir = paste0(data.dir,sample_name,"/")
-  dir.create(sample.dir)
+  if(!dir.exists(sample.dir)) {
+    dir.create(sample.dir)
+  }
+  
+  ## get correct name of mtrx file
+  if(sample_name == "LMO_MULTISeq_cells"){
+    sample_name = "LMO_MULTseq_cells"
+  }
   
   #count matrix file
   download.file(paste0("https://www.ebi.ac.uk/biostudies/files/E-MTAB-9964/matrix_",sample_name,".mtx.gz"),
                 destfile = paste0(sample.dir,"/matrix.mtx.gz"))
+  
   #barcodes file
   download.file(paste0("https://www.ebi.ac.uk/biostudies/files/E-MTAB-9964/barcodes_",sample_name,".tsv.gz"),
                 destfile = paste0(sample.dir,"/barcodes.tsv.gz"))
@@ -36,8 +51,15 @@ for (sample_name in samples) {
   download.file(paste0("https://www.ebi.ac.uk/biostudies/files/E-MTAB-9964/features_",sample_name,".tsv.gz"),
                 destfile = paste0(sample.dir,"/features.tsv.gz"))
   
+  ## get correct name of annotation file
+  if(sample_name == "LMO_MULTseq_cells"){
+    sample_name = "LMO_MULTISeq_cells"
+  }else if(sample_name == "TotalSeqA_cells_rep2"){
+    sample_name = "TotalSeqA_rep2_cells"
+  }
+  
   # ground truth file
-  download.file(paste0("https://ftp.ebi.ac.uk/biostudies/nfs/E-MTAB-/964/E-MTAB-9964/Files/",sample_name
+  download.file(paste0("https://www.ebi.ac.uk/biostudies/files/E-MTAB-9964/",sample_name
                        ,"_freemuxlet_MULTI_HTO_GMM_annotations.csv"), destfile = paste0(sample.dir,"/ground_truth.csv") )
   
   # preprocess ground truth
@@ -49,18 +71,18 @@ for (sample_name in samples) {
   
   # read tag counts matrix
   raw_mtrx = Read10X(sample.dir ,  strip.suffix = T)$`Antibody Capture` 
-  rownames(raw_mtrx)
-  
-  # update tag names to be consistent with ground truth
-  xx = table(ground.truth$MULTI_ID[!ground.truth$MULTI_ID %in% c("Doublet","Negative")], ground.truth$MULTI_classification[!ground.truth$MULTI_ID %in% c("Doublet","Negative")])
-  xx
-  rownames(raw_mtrx) = apply(xx,MARGIN = 2,FUN = function(x) names(x)[x == max(x)] )
-  
   raw_mtrx=raw_mtrx[,ground.truth$cell]
   
+  # keep only tags that are expressed in > 30 cells
   valid_tags = rownames(raw_mtrx)[rowSums(raw_mtrx > 0) > 30]
   raw_mtrx=raw_mtrx[valid_tags,]
   
+  # update tag names to be consistent with ground truth
+  
+  if(sample_name != "LMO_MULTISeq_cells"){
+    xx = table(ground.truth$MULTI_ID[!ground.truth$MULTI_ID %in% c("Doublet","Negative")], ground.truth$MULTI_classification[!ground.truth$MULTI_ID %in% c("Doublet","Negative")])
+    rownames(raw_mtrx) = apply(xx,MARGIN = 2,FUN = function(x) names(x)[x == max(x)] )
+  }
   # create Seurat object
   seurat_object = CreateSeuratObject(counts = raw_mtrx,assay = "HTO",)
   
@@ -74,8 +96,7 @@ for (sample_name in samples) {
   saveRDS(seurat_object, file = paste0(seurat.dir,sample_name,".rds"))
 }
 
-########## Howitt (2022)#########################################################
-#citation: Howitt et al. "Benchmarking single-cell hashtag oligo demultiplexing methods." NAR Genomics and Bioinformatics 5.4 (2023)
+########## Howitt (2022)##########################################################
 # data from 
 data.source = "https://raw.githubusercontent.com/Oshlack/hashtag-demux-paper/f91952b926159d245a954796a16fa398f58e56c3/data/"
 
@@ -158,7 +179,6 @@ saveRDS( list.obs[[7]], file = paste0(seurat.dir,"lung_cell_line",".rds"))
 
 
 ########## McGinnis (2019)##########################################################
-# citation: McGinnis et al. "MULTI-seq: sample multiplexing for single-cell RNA sequencing using lipid-tagged indices." Nature methods 16.7 (2019): 619-626.
 sample_name = "McGinnis_2019"
 sample.dir = paste0(data.dir,sample_name,"/")
 dir.create(sample.dir)
