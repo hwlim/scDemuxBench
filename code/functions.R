@@ -190,7 +190,7 @@ doublet_calling <- function(seurat_object ,calls_column, ground_truth_column){
 
 ## calculates Recall, Precision, and Fscore metrics for classification performance
 # modified from "calculate_HTO_fscore" function @ https://github.com/Oshlack/hashtag-demux-paper/blob/main/analysis/BAL_analysis.Rmd
-evaluate_predictions <- function(seurat_object ,calls_column, ground_truth_column) {
+evaluate_predictions <- function(seurat_object ,calls_column, ground_truth_column = "ground_truth") {
   calls <- seurat_object@meta.data[,calls_column]
   ground_truth <- seurat_object@meta.data[,ground_truth_column]
   f <- NULL

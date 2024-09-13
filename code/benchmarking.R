@@ -11,6 +11,7 @@ source("./functions.R")
 set.seed(1)
 ###### load Seurat objects
 data.dir <- "../results/simulated/"
+data.dir <- "../results/real/"
 samples <- list.files(data.dir, pattern = "*.rds", full.names=F)
 results_dir = "../results/"
 gmm_demux_results_dir = "../results/gmm/"
@@ -30,10 +31,10 @@ normalization_based = paste0(combinations$Var2,"(",combinations$Var1,")")
 
 cellhashR_methods =  c("dropletutils", "bff_raw", "bff_cluster")
 
-#workflows = list("normalization_based" = normalization_based,"cellhashR_methods" = cellhashR_methods,
-#                "demuxmix" = "demuxmix", "deMULTIplex2" = "deMULTIplex2", "GMM_Demux" = "GMM_Demux")
+workflows = list("normalization_based" = normalization_based,"cellhashR_methods" = cellhashR_methods,
+                "demuxmix" = "demuxmix", "deMULTIplex2" = "deMULTIplex2", "GMM_Demux" = "GMM_Demux")
 
-workflows = list("demuxmix" = "demuxmix")
+#workflows = list("demuxmix" = "demuxmix")
 
 # mapping tags in counts matrices to ground truth ID
 McGinnis_2019_tag_mapping = list( "Bar1" = "HEK", "Bar2" = "HEK", "Bar3" = "MEF","Bar4" ="MEF",
